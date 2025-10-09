@@ -118,6 +118,20 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, authCodeURL, http.StatusTemporaryRedirect)
 }
 
+// appendQueryParam safely appends a key=value to a URL, preserving existing query params
+func appendQueryParam(base, key, value string) (string, error) {
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", err
+	}
+
+	q := u.Query()
+	q.Set(key, value) // replaces if already exists
+	u.RawQuery = q.Encode()
+
+	return u.String(), nil
+}
+
 func handleCallback(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/callback/"), "/")
 	if len(parts) < 1 {
@@ -168,8 +182,14 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 
 	jwt, _ := signJWT(payload)
 
+	// Append payload safely; existing query params (like callbackUrl) remain intact
+	final, err := appendQueryParam(redirect, "oauthPayload", jwt)
+	if err != nil {
+		http.Error(w, "failed to build redirect URL", http.StatusInternalServerError)
+		return
+	}
+
 	// Redirect back with signed JWT payload
-	final := fmt.Sprintf("%s?oauthPayload=%s", redirect, url.QueryEscape(jwt))
 	http.Redirect(w, r, final, http.StatusTemporaryRedirect)
 }
 
