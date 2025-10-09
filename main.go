@@ -177,7 +177,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 		"provider": providerName,
 		"user":     user,
 		"token":    token.AccessToken,
-		"exp":      time.Now().Add(5 * time.Minute).Unix(),
+		"exp":      time.Now().Add(1 * time.Minute).Unix(),
 	}
 
 	jwt, _ := signJWT(payload)
