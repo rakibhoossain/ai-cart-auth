@@ -1,4 +1,4 @@
-module ai-auth
+module ai-cart-auth
 
 go 1.25.1
 
