@@ -19,6 +19,9 @@ import (
 	"golang.org/x/oauth2/github"
 	"golang.org/x/oauth2/google"
 	"golang.org/x/oauth2/linkedin"
+
+	"ai-cart-auth/pkg/passkey"
+	"ai-cart-auth/pkg/twofactor"
 )
 
 func init() {
@@ -46,6 +49,17 @@ func main() {
 	http.HandleFunc("/health", handleHealth)
 	http.HandleFunc("/login/", handleLogin)
 	http.HandleFunc("/callback/", handleCallback)
+
+	// 2FA TOTP & Backup Handlers
+	http.HandleFunc("/api/v1/twofactor/generate", handleTwoFactorGenerate)
+	http.HandleFunc("/api/v1/twofactor/verify-totp", handleTwoFactorVerifyTOTP)
+	http.HandleFunc("/api/v1/twofactor/verify-backup", handleTwoFactorVerifyBackup)
+
+	// Passkey FIDO2 Handlers
+	http.HandleFunc("/api/v1/passkey/generate-register-options", handlePasskeyGenerateRegisterOptions)
+	http.HandleFunc("/api/v1/passkey/verify-registration", handlePasskeyVerifyRegistration)
+	http.HandleFunc("/api/v1/passkey/generate-auth-options", handlePasskeyGenerateAuthOptions)
+	http.HandleFunc("/api/v1/passkey/verify-authentication", handlePasskeyVerifyAuthentication)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -473,4 +487,220 @@ func signJWT(data map[string]interface{}) (string, error) {
 	signature := base64.RawURLEncoding.EncodeToString(h.Sum(nil))
 
 	return fmt.Sprintf("%s.%s", unsigned, signature), nil
+}
+
+// -----------------------------------------------------------------------------
+// 2FA TOTP & Backup Handlers (Stateless)
+// -----------------------------------------------------------------------------
+
+func handleTwoFactorGenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		Issuer string `json:"issuer"`
+		Email  string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err.Error() != "EOF" {
+		jsonError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	res, err := twofactor.GenerateSecret(req.Issuer, req.Email)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data":    res,
+	})
+}
+
+func handleTwoFactorVerifyTOTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		Secret string `json:"secret"`
+		Code   string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	if req.Secret == "" || req.Code == "" {
+		jsonError(w, http.StatusBadRequest, "Missing secret or code")
+		return
+	}
+
+	valid, err := twofactor.VerifyTOTP(req.Secret, req.Code, time.Now())
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data": map[string]bool{
+			"valid": valid,
+		},
+	})
+}
+
+func handleTwoFactorVerifyBackup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		Code         string   `json:"code"`
+		BackupHashes []string `json:"backupHashes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	valid, remaining := twofactor.VerifyBackupCode(req.Code, req.BackupHashes)
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data": map[string]interface{}{
+			"valid":           valid,
+			"remainingHashes": remaining,
+		},
+	})
+}
+
+// -----------------------------------------------------------------------------
+// Passkey FIDO2 Handlers (Stateless)
+// -----------------------------------------------------------------------------
+
+func handlePasskeyGenerateRegisterOptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		UserID     string `json:"userId"`
+		UserEmail  string `json:"userEmail"`
+		UserName   string `json:"userName"`
+		RPID       string `json:"rpId"`
+		RPName     string `json:"rpName"`
+		Attachment string `json:"attachment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	opts, err := passkey.GenerateRegisterOptions(req.UserID, req.UserEmail, req.UserName, req.RPID, req.RPName, req.Attachment)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data":    opts,
+	})
+}
+
+func handlePasskeyVerifyRegistration(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var input passkey.RegistrationVerificationInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		jsonError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	res, err := passkey.VerifyRegistration(&input)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data":    res,
+	})
+}
+
+func handlePasskeyGenerateAuthOptions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var req struct {
+		RPID               string   `json:"rpId"`
+		AllowCredentialIDs []string `json:"allowCredentialIds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		jsonError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	opts, err := passkey.GenerateAuthOptions(req.RPID, req.AllowCredentialIDs)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data":    opts,
+	})
+}
+
+func handlePasskeyVerifyAuthentication(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	var input passkey.AuthenticationVerificationInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		jsonError(w, http.StatusBadRequest, "Invalid request payload")
+		return
+	}
+
+	res, err := passkey.VerifyAuthentication(&input)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	jsonResponse(w, http.StatusOK, map[string]interface{}{
+		"success": true,
+		"data":    res,
+	})
+}
+
+func jsonResponse(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+func jsonError(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": false,
+		"error":   message,
+	})
 }
