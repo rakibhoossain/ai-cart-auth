@@ -542,12 +542,9 @@ func handleTwoFactorVerifyTOTP(w http.ResponseWriter, r *http.Request) {
 
 	valid, err := twofactor.VerifyTOTP(req.Secret, req.Code, time.Now())
 	if err != nil {
-		log.Printf("[ai-auth] handleTwoFactorVerifyTotp error: %v", err)
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	log.Printf("[ai-auth] handleTwoFactorVerifyTotp: code='%s', valid=%v (serverTime=%s)", req.Code, valid, time.Now().UTC().Format(time.RFC3339))
 
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -573,7 +570,6 @@ func handleTwoFactorVerifyBackup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	valid, remaining := twofactor.VerifyBackupCode(req.Code, req.BackupHashes)
-	log.Printf("[ai-auth] handleTwoFactorVerifyBackup: valid=%v, remainingCount=%d", valid, len(remaining))
 
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -607,12 +603,8 @@ func handlePasskeyGenerateRegisterOptions(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	log.Printf("[ai-auth] handlePasskeyGenerateRegisterOptions: userId=%s, userEmail=%s, rpId=%s, rpName=%s",
-		req.UserID, req.UserEmail, req.RPID, req.RPName)
-
 	opts, err := passkey.GenerateRegisterOptions(req.UserID, req.UserEmail, req.UserName, req.RPID, req.RPName, req.Attachment)
 	if err != nil {
-		log.Printf("[ai-auth] handlePasskeyGenerateRegisterOptions error: %v", err)
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -635,17 +627,11 @@ func handlePasskeyVerifyRegistration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[ai-auth] handlePasskeyVerifyRegistration: credId=%s, expectedOrigin='%s', expectedRpId='%s', expectedChallenge='%s'",
-		input.CredentialID, input.ExpectedOrigin, input.ExpectedRPID, input.ExpectedChallenge)
-
 	res, err := passkey.VerifyRegistration(&input)
 	if err != nil {
-		log.Printf("[ai-auth] handlePasskeyVerifyRegistration FAILED: %v", err)
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	log.Printf("[ai-auth] handlePasskeyVerifyRegistration SUCCESS: credId=%s", res.CredentialID)
 
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"success": true,
@@ -668,11 +654,8 @@ func handlePasskeyGenerateAuthOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[ai-auth] handlePasskeyGenerateAuthOptions: rpId=%s, allowCount=%d", req.RPID, len(req.AllowCredentialIDs))
-
 	opts, err := passkey.GenerateAuthOptions(req.RPID, req.AllowCredentialIDs)
 	if err != nil {
-		log.Printf("[ai-auth] handlePasskeyGenerateAuthOptions error: %v", err)
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -695,17 +678,11 @@ func handlePasskeyVerifyAuthentication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("[ai-auth] handlePasskeyVerifyAuthentication: credId=%s, expectedOrigin='%s', expectedRpId='%s'",
-		input.CredentialID, input.ExpectedOrigin, input.ExpectedRPID)
-
 	res, err := passkey.VerifyAuthentication(&input)
 	if err != nil {
-		log.Printf("[ai-auth] handlePasskeyVerifyAuthentication FAILED: %v", err)
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	log.Printf("[ai-auth] handlePasskeyVerifyAuthentication SUCCESS: credId=%s", res.CredentialID)
 
 	jsonResponse(w, http.StatusOK, map[string]interface{}{
 		"success": true,
