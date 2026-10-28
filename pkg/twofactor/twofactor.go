@@ -71,14 +71,15 @@ func GenerateSecret(issuer, email string) (*GenerateResult, error) {
 	}, nil
 }
 
-// VerifyTOTP validates a 6-digit TOTP code against a Base32 secret with a 30s drift window (offset -1, 0, +1)
+// VerifyTOTP validates a 6-digit TOTP code against a Base32 secret with a 60s drift window (offset -2 to +2)
 func VerifyTOTP(secret string, code string, t time.Time) (bool, error) {
-	cleanCode := strings.TrimSpace(code)
+	cleanCode := strings.ReplaceAll(strings.TrimSpace(code), " ", "")
+	cleanCode = strings.ReplaceAll(cleanCode, "-", "")
 	if len(cleanCode) != 6 {
 		return false, nil
 	}
 
-	for offset := -1; offset <= 1; offset++ {
+	for offset := -2; offset <= 2; offset++ {
 		candidateTime := t.Add(time.Duration(offset*30) * time.Second)
 		expected, err := GenerateTOTP(secret, candidateTime)
 		if err == nil && expected == cleanCode {

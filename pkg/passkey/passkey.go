@@ -209,26 +209,50 @@ func DecodeClientData(encoded string) (*ClientData, error) {
 	return &cd, nil
 }
 
+func cleanHost(raw string) string {
+	s := strings.TrimSpace(raw)
+	if strings.Contains(s, "://") {
+		parts := strings.SplitN(s, "://", 2)
+		s = parts[1]
+	}
+	if strings.Contains(s, "/") {
+		s = strings.SplitN(s, "/", 2)[0]
+	}
+	if strings.Contains(s, ":") {
+		s = strings.SplitN(s, ":", 2)[0]
+	}
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func normalizeChallenge(c string) string {
+	return strings.TrimRight(strings.ReplaceAll(strings.ReplaceAll(c, "+", "-"), "/", "_"), "=")
+}
+
 // VerifyOrigin checks if clientData.origin matches expected origin or domain
 func VerifyOrigin(clientOrigin, expectedOrigin, expectedRpId string) bool {
 	if clientOrigin == expectedOrigin {
 		return true
 	}
 
+	clientH := cleanHost(clientOrigin)
+	expectedH := cleanHost(expectedOrigin)
+	rpH := cleanHost(expectedRpId)
+
+	if clientH != "" {
+		if expectedH != "" && clientH == expectedH {
+			return true
+		}
+		if rpH != "" && (clientH == rpH || strings.HasSuffix(clientH, "."+rpH)) {
+			return true
+		}
+	}
+
 	clientParsed, err := url.Parse(clientOrigin)
-	if err != nil {
-		return false
-	}
-
-	// Compare hostname with rpId
-	clientHost := clientParsed.Hostname()
-	if clientHost == expectedRpId || strings.HasSuffix(clientHost, "."+expectedRpId) {
-		return true
-	}
-
-	expectedParsed, err := url.Parse(expectedOrigin)
-	if err == nil && clientHost == expectedParsed.Hostname() {
-		return true
+	if err == nil {
+		clientHost := strings.ToLower(clientParsed.Hostname())
+		if clientHost != "" && (clientHost == rpH || strings.HasSuffix(clientHost, "."+rpH)) {
+			return true
+		}
 	}
 
 	return false
@@ -253,12 +277,12 @@ func VerifyRegistration(input *RegistrationVerificationInput) (*RegistrationResu
 		return nil, fmt.Errorf("invalid clientData type: %s, expected webauthn.create", clientData.Type)
 	}
 
-	if clientData.Challenge != input.ExpectedChallenge {
-		return nil, errors.New("challenge mismatch: cryptographic challenge does not match expected value")
+	if normalizeChallenge(clientData.Challenge) != normalizeChallenge(input.ExpectedChallenge) {
+		return nil, fmt.Errorf("challenge mismatch: received '%s', expected '%s'", clientData.Challenge, input.ExpectedChallenge)
 	}
 
 	if input.ExpectedOrigin != "" && !VerifyOrigin(clientData.Origin, input.ExpectedOrigin, input.ExpectedRPID) {
-		return nil, fmt.Errorf("origin mismatch: received '%s', expected '%s'", clientData.Origin, input.ExpectedOrigin)
+		return nil, fmt.Errorf("origin mismatch: received '%s', expected '%s' (rpId: '%s')", clientData.Origin, input.ExpectedOrigin, input.ExpectedRPID)
 	}
 
 	deviceType := input.DeviceType
@@ -305,12 +329,12 @@ func VerifyAuthentication(input *AuthenticationVerificationInput) (*Authenticati
 		return nil, fmt.Errorf("invalid clientData type: %s, expected webauthn.get", clientData.Type)
 	}
 
-	if clientData.Challenge != input.ExpectedChallenge {
-		return nil, errors.New("challenge mismatch: cryptographic challenge does not match expected value")
+	if normalizeChallenge(clientData.Challenge) != normalizeChallenge(input.ExpectedChallenge) {
+		return nil, fmt.Errorf("challenge mismatch: received '%s', expected '%s'", clientData.Challenge, input.ExpectedChallenge)
 	}
 
 	if input.ExpectedOrigin != "" && !VerifyOrigin(clientData.Origin, input.ExpectedOrigin, input.ExpectedRPID) {
-		return nil, fmt.Errorf("origin mismatch: received '%s', expected '%s'", clientData.Origin, input.ExpectedOrigin)
+		return nil, fmt.Errorf("origin mismatch: received '%s', expected '%s' (rpId: '%s')", clientData.Origin, input.ExpectedOrigin, input.ExpectedRPID)
 	}
 
 	newCounter := input.StoredCounter + 1
